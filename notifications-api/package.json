@@ -1,0 +1,26 @@
+{
+  "name": "learn-appsync",
+  "version": "1.0.0",
+  "description": "Learning AWS AppSync with integration with Kinesis as an event source.",
+  "main": "handler.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://jarchowk@github.com/MorganMcKinleyRDI/learn-appsync.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/MorganMcKinleyRDI/learn-appsync/issues"
+  },
+  "homepage": "https://github.com/MorganMcKinleyRDI/learn-appsync#readme",
+  "dependencies": {
+    "aws-sdk": "^2.322.0",
+    "npm": "^6.4.1",
+    "serverless-appsync-plugin": "^1.0.5",
+    "serverless-pseudo-parameters": "^2.2.0"
+  }
+}
