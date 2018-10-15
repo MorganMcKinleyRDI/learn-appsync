@@ -9,10 +9,64 @@ provider:
   runtime: nodejs8.10
   profile: sandbox
   region: eu-west-1
-
+  iamRoleStatements:
+    - Effect: "Allow"
+      Action:
+        - "logs:CreateLogStream"
+      Resource:
+        - "arn:aws:logs:eu-west-1:{**accountID**}:log-group:/aws/lambda/${self:service}-*"
+    - Effect: "Allow"
+      Action:
+        - "logs:PutLogEvents"
+      Resource:
+        - "arn:aws:logs:eu-west-1:{**accountID**}:log-group:/aws/lambda/${self:service}-*"
+    - Effect: Allow
+      Action:
+        - 'kinesis:DescribeStream'
+        - 'kinesis:GetRecords'
+        - 'kinesis:GetShardIterator'
+        - 'kinesis:ListStreams'
+        - 'kinesis:PutRecord'
+        - 'kinesis:PutRecords'
+      Resource:
+        Fn::GetAtt: [ EventStream, Arn ]
+    - Effect: "Allow"
+      Action:
+        - "lambda:InvokeFunction"
+      Resource:
+        - "arn:aws:lambda:eu-west-1:{**accountID**}:function:${self:service}-*"
+    - Effect: "Allow"
+      Action:
+        - "dynamodb:PutItem"
+        - "dynamodb:GetItem"
+        - "dynamodb:Scan"
+        - "dynamodb:Query"
+      Resource:
+        - "arn:aws:dynamodb:eu-west-1:{**accountID**}:table/learn-appsync-*"
 functions:
   graphql:
     handler: notifications/notifications.graphql
+    name: ${self:service}-graphql
+    environment:
+      WRITER_NAME: ${self:service}-eventWriter
+      MESSAGES_TABLE_NAME: "${self:service}-notifications"
+  eventWriter:
+    handler: notifications/notifications.writer
+    name: ${self:service}-eventWriter
+    environment:
+      STREAM_NAME: "Kinesis-${self:service}"
+  eventReader:
+    handler: notifications/notifications.reader
+    name: ${self:service}-eventReader
+    environment:
+      STREAM_NAME: "Kinesis-${self:service}"
+      MESSAGES_TABLE_NAME: "${self:service}-notifications"
+    events:
+      - stream:
+        arn: arn:aws:kinesis:eu-west-1:{**accountID**}:stream/Kinesis-learn-appsync
+        batchSize: 100
+        startingPosition: TRIM_HORIZON   
+        enabled: true 
 
 custom:
   accountId: #{AWS::AccountId}
@@ -25,10 +79,25 @@ custom:
       userPoolId:  { Ref: CognitoUserPool } 
     mappingTemplates:
       - dataSource: awsLambdaDataSource
+        type: Mutation #Query, Mutation, Subscription
+        field: addMessage
+        request: "add-messages-request-mapping-template.txt"
+        response: "add-messages-response-mapping-template.txt"
+      - dataSource: learnAppsyncComments
+        type: Mutation #Query, Mutation, Subscription
+        field: addComment
+        request: "add-comment-request-mapping-template.txt"
+        response: "add-comment-response-mapping-template.txt"
+      - dataSource: awsLambdaDataSource
         type: Query #Query, Mutation, Subscription
-        field: message
-        request: "notifications-request-mapping-template.txt"
-        response: "notifications-response-mapping-template.txt"
+        field: getMessage
+        request: "get-messages-request-mapping-template.txt"
+        response: "get-messages-response-mapping-template.txt"
+      - dataSource: learnAppsyncNotifications
+        type: Query #Query, Mutation, Subscription
+        field: getAllMessages
+        request: "get-all-messages-request-mapping-template.txt"
+        response: "get-all-messages-response-mapping-template.txt"
     schema: # defaults schema.graphql
     serviceRole: "AppSyncServiceRole"
     dataSources:
@@ -37,7 +106,17 @@ custom:
         description: 'Lambda DataSource'
         config:
           lambdaFunctionArn: { Fn::GetAtt: [GraphqlLambdaFunction, Arn] }
-          serviceRoleArn: { Fn::GetAtt: [AppSyncLambdaServiceRole, Arn] }
+          serviceRoleArn: "arn:aws:iam::{**accountID**}:role/Lambda-${self:custom.appSync.serviceRole}"
+      - type: AMAZON_DYNAMODB
+        name: learnAppsyncNotifications
+        config:
+          tableName: { Ref: MessagesTable } # Where MyTable is a dynamodb table defined in Resources
+          serviceRoleArn: "arn:aws:iam::{**accountID**}:role/Lambda-${self:custom.appSync.serviceRole}" # Where AppSyncDynamoDBServiceRole is an IAM role defined in Resources
+      - type: AMAZON_DYNAMODB
+        name: learnAppsyncComments
+        config:
+          tableName: { Ref: CommentsTable } # Where MyTable is a dynamodb table defined in Resources
+          serviceRoleArn: "arn:aws:iam::{**accountID**}:role/Lambda-${self:custom.appSync.serviceRole}" # Where AppSyncDynamoDBServiceRole is an IAM role defined in Resources
 
 resources:
   Resources:
@@ -162,5 +241,61 @@ resources:
                   Action:
                     - "lambda:invokeFunction"
                   Resource:
-                    - "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-dev-graphql"
-                    - "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-dev-graphql:*"
+                    - "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-*"
+                - Effect: "Allow"
+                  Action:
+                    - "dynamodb:GetItem"
+                  Resource:
+                    - "arn:aws:dynamodb:#{AWS::Region}:#{AWS::AccountId}:${self:service}-*"
+
+    EventStream:
+      Type: AWS::Kinesis::Stream
+      Properties:
+        Name: "Kinesis-${self:service}"
+        ShardCount: 1
+    MessagesTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: "${self:service}-notifications"
+        AttributeDefinitions: 
+          - 
+            AttributeName: "id"
+            AttributeType: "S"
+          - 
+            AttributeName: "timestamp"
+            AttributeType: "N"
+        KeySchema: 
+          - 
+            AttributeName: "id"
+            KeyType: "HASH"
+          -
+            AttributeName: "timestamp"
+            KeyType: "RANGE"
+        StreamSpecification:
+          StreamViewType: "NEW_IMAGE"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5
+    CommentsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: "${self:service}-comments"
+        AttributeDefinitions: 
+          - 
+            AttributeName: "id"
+            AttributeType: "S"
+          - 
+            AttributeName: "timestamp"
+            AttributeType: "N"
+        KeySchema: 
+          - 
+            AttributeName: "id"
+            KeyType: "HASH"
+          -
+            AttributeName: "timestamp"
+            KeyType: "RANGE"
+        StreamSpecification:
+          StreamViewType: "NEW_IMAGE"
+        ProvisionedThroughput:
+          ReadCapacityUnits: 5
+          WriteCapacityUnits: 5          

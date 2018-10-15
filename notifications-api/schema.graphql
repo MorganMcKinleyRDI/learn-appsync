@@ -1,7 +1,36 @@
-type Query {
-	message(consumer_key: String, consumer_secret: String): String!
-}
-
 schema {
 	query: Query
+	mutation: Mutation
+	subscription: Subscription
+}
+
+type Mutation {
+    addMessage(id: ID, message: String, username: String, created: Int, timestamp: Int): Message!
+    addComment(id: ID!, timestamp: Int!, content: String): Comment
+}
+
+type Message {
+	id: ID!
+	username: String!
+	message: String!
+	timestamp: Int!
+	created: Int!
+	comments: [Comment]
+}
+
+type Comment {
+	id: ID!
+	timestamp: Int!
+	content: String
+}	 
+
+type Query {
+	getMessage(id: ID!): [Message]
+	getAllMessages: [Message]
+}
+
+type Subscription
+{
+	onAddMessage(id: ID): Message
+	@aws_subscribe(mutations: ["addMessage"])
 }
